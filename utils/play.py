@@ -2,16 +2,10 @@ import cv2
 import numpy as np
 import json
 import time
+from itertools import count
 
-cap = cv2.VideoCapture("data/WT9.avi")
 fgbg = cv2.bgsegm.createBackgroundSubtractorMOG()
 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
-
-x1 = 50
-x2 = 150
-y1 = 50
-y2 = 200
-
 
 def find_connected_component(graph, frame):
     assert graph.ndim == 2
@@ -39,11 +33,11 @@ def find_connected_component(graph, frame):
     return [
         ret
         for xy in nonzero
-        if (ret:=dfs(xy))
+        if (ret := dfs(xy))
     ]
 
 
-def process(cons):
+def process(cons, args):
     total_point = sum(len(con) for _, con in cons)
     middle_frame = sum(frame * len(con) for frame, con in cons) // total_point
     xs, ys = zip(*[
@@ -61,64 +55,74 @@ def process(cons):
         'y_min': min(ys),
         'y_max': max(ys),
         'y': sum(ys) // total_point,
+        'total_point': total_point,
     }
     for k in info.keys():
-        if k.startswith('x'):
-            info[k] += x1
-        if k.startswith('y'):
-            info[k] += y1
+        if k in ('x', 'x_min', 'x_max'):
+            info[k] += args.x[0]
+        if k in ('y', 'y_min', 'y_max'):
+            info[k] += args.y[0]
+    print(f'\r{total_point=}')
     return info
 
 
-def main():
-    count = 0
+def play(args):
+    cap = cv2.VideoCapture(args.video)
+    assert cap.isOpened(), f'Check if the video path is correct: {args.video}'
+
     components = []
-    prev_connects = []
-    while cap.isOpened():
+    prev_comps = []
+    outlier = set()
+    for frame_i in count(0):  # Infinite loop
         ret, frame = cap.read()
         if not ret:
             break
 
-        count += 1
-        print(f'\r{count} ', end='')
-        frame = frame[x1:x2, y1:y2, 0]
+        print(f'\r{frame_i} ', end='')
+        if args.start is not None and frame_i < args.start:
+            continue
+
+        if args.fps is not None:
+            time.sleep(1/args.fps)
+
+        assert frame.ndim == 3, f'Espected video in 3 chans but {frame.ndim}'
+        x1, x2 = args.x
+        y1, y2 = args.y
+        frame = frame[x1:x2, y1:y2, 0]  # TODO: use args
+
         fgmask = fgbg.apply(frame)
-
-        # if count < 1600:
-        #     continue
-
         fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, kernel)
-        connects = find_connected_component(fgmask, count)
+
+        comps = find_connected_component(fgmask, frame_i)
 
         prev_cur = [
             [
                 i
-                for i, con in enumerate(connects)
+                for i, con in enumerate(comps)
                 if con & prev_cons[-1][1]
             ]
-            for prev_cons in prev_connects
+            for prev_cons in prev_comps
         ]
 
-        for curs, cons in zip(prev_cur, prev_connects):
-            if curs:
-                # assert len(curs) == 1, len(curs)
-                cur = connects[curs[0]]
-                for cur_i in curs[1:]:  # If any
-                    print('Warning: one to many')
-                    cur |= connects[cur_i]
-                cons.append((count, cur))
+        for curs, p_comps in zip(prev_cur, prev_comps):
+            if curs:  # If prev
+                cur = comps[curs[0]]
+                for cur_i in curs[1:]:
+                    print('\rWarning: one to many')
+                    outlier.add(id(comps))
+                    cur |= comps[cur_i]
+                p_comps.append((frame_i, cur))
             else:
-                assert isinstance(cons, list), cons
+                assert isinstance(p_comps, list), p_comps
                 assert all(
                     isinstance(con, tuple) and len(con) == 2
-                    for con in cons
-                ), cons
-                components.append(process(cons))
-                print(sum(len(con) for _, con in cons))
+                    for con in p_comps
+                ), p_comps
+                components.append(process(p_comps, args))
 
-        prev_connects = [
+        prev_comps = [
             con
-            for curs, con in zip(prev_cur, prev_connects)
+            for curs, con in zip(prev_cur, prev_comps)
             if curs
         ]
 
@@ -130,11 +134,11 @@ def main():
 
         if len(cur_connected) != len(
                 list(i for ll in prev_cur for i in ll)):
-            print('Warning: many to one')
+            print('\rWarning: many to one')
 
-        for i, con in enumerate(connects):
+        for i, con in enumerate(comps):
             if i not in cur_connected:
-                prev_connects.append([(count, con)])
+                prev_comps.append([(frame_i, con)])
 
         # fgmask = np.stack([fgmask for _ in range(3)], axis=2)
         # frame = cv2.hconcat([frame, fgmask])
@@ -143,12 +147,9 @@ def main():
         if cv2.waitKey(10) & 0xFF == ord('q'):
             break
 
-    with open('crop_list.txt', 'w') as f:
-        print(components)
+    with open(args.json, 'w') as f:
         json.dump(components, f)
+    print(f'\nFound {len(components)} events, save to {args.json}')
 
     cap.release()
     cv2.destroyAllWindows()  # destroy all opened windows
-
-
-main()

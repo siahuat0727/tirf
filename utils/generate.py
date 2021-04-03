@@ -2,6 +2,7 @@ import cv2
 import json
 import matplotlib.pyplot as plt
 from collections import deque
+from itertools import count
 
 
 class SmallVideo:
@@ -54,9 +55,11 @@ class SmallVideo:
         return self.title, self.start_frame, self.intensity
 
 
-def save_videos(infos):
+def save_videos(infos, args):
 
-    cap = cv2.VideoCapture("data/WT9.avi")
+    cap = cv2.VideoCapture(args.video)
+    assert cap.isOpened(), f'Check if the video path is correct: {args.video}'
+
     fps = cap.get(5)
 
     videos = list(sorted([
@@ -72,12 +75,13 @@ def save_videos(infos):
     active = []
     plots = []
 
-    frame_i = 0
-    while cap.isOpened() and (videos or active):
+    for frame_i in count(0):  # Infinite loop
+        if not (videos or active):
+            break
+
         while videos and videos[0].is_start(frame_i):
             active.append(videos.popleft())
 
-        frame_i += 1
         print(f'\r{frame_i} ', end='')
 
         _, frame = cap.read()  # TODO: pass if no active (do need really read)
@@ -121,11 +125,8 @@ def plot_graphs(plots, row=4, col=4):
         plot_graph(row, col, data, i)
 
 
-def main():
-    with open('crop_list.txt') as f:
+def generate(args):
+    with open(args.json) as f:
         infos = json.load(f)
-    plots = save_videos(infos)
+    plots = save_videos(infos, args)
     plot_graphs(plots)
-
-
-main()
