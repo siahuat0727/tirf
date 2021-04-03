@@ -56,7 +56,7 @@ class SmallVideo:
 
 def save_videos(infos):
 
-    cap = cv2.VideoCapture("./WT9.avi")
+    cap = cv2.VideoCapture("data/WT9.avi")
     fps = cap.get(5)
 
     videos = list(sorted([
