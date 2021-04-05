@@ -14,6 +14,8 @@ def parse():
                         help='In PLAY mode, skip until this frame')
     parser.add_argument('--video', type=str,
                         help='Input video path')
+    parser.add_argument('--output', type=str, default='results',
+                        help='Output results path')
     parser.add_argument('--x', type=int, nargs='+',
                         help='In PLAY mode, the range of x-axis displayed')
     parser.add_argument('--y', type=int, nargs='+',

@@ -2,7 +2,7 @@ import cv2
 import json
 import matplotlib.pyplot as plt
 from collections import deque
-from itertools import count
+from utils import Tirf
 
 
 class SmallVideo:
@@ -57,13 +57,10 @@ class SmallVideo:
 
 def save_videos(infos, args):
 
-    cap = cv2.VideoCapture(args.video)
-    assert cap.isOpened(), f'Check if the video path is correct: {args.video}'
-
-    fps = cap.get(5)
+    tirf = Tirf(args.video)
 
     videos = list(sorted([
-        SmallVideo(info, fps, name=f'{i}')
+        SmallVideo(info, tirf.fps, name=f'{i}')
         for i, info in enumerate(infos)
     ], key=lambda obj: obj.start_frame))
 
@@ -75,7 +72,7 @@ def save_videos(infos, args):
     active = []
     plots = []
 
-    for frame_i in count(0):  # Infinite loop
+    for frame_i, frame in tirf.readall():
         if not (videos or active):
             break
 
@@ -84,7 +81,6 @@ def save_videos(infos, args):
 
         print(f'\r{frame_i} ', end='')
 
-        _, frame = cap.read()  # TODO: pass if no active (do need really read)
         if not active:
             continue
 

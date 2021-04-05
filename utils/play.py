@@ -2,10 +2,8 @@ import cv2
 import numpy as np
 import json
 import time
-from itertools import count
+from utils import Tirf
 
-fgbg = cv2.bgsegm.createBackgroundSubtractorMOG()
-kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
 
 def find_connected_component(graph, frame):
     assert graph.ndim == 2
@@ -62,33 +60,28 @@ def process(cons, args):
             info[k] += args.x[0]
         if k in ('y', 'y_min', 'y_max'):
             info[k] += args.y[0]
-    print(f'\r{total_point=}')
     return info
 
 
 def play(args):
-    cap = cv2.VideoCapture(args.video)
-    assert cap.isOpened(), f'Check if the video path is correct: {args.video}'
 
     components = []
     prev_comps = []
     outlier = set()
-    for frame_i in count(0):  # Infinite loop
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        print(f'\r{frame_i} ', end='')
+    fgbg = cv2.bgsegm.createBackgroundSubtractorMOG()
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
+    tirf = Tirf(args.video)
+    for frame_i, frame in tirf.readall():
+        print(f'\rFrame: {frame_i}, found {len(components)} events', end='')
         if args.start is not None and frame_i < args.start:
             continue
 
         if args.fps is not None:
             time.sleep(1/args.fps)
 
-        assert frame.ndim == 3, f'Espected video in 3 chans but {frame.ndim}'
         x1, x2 = args.x
         y1, y2 = args.y
-        frame = frame[x1:x2, y1:y2, 0]  # TODO: use args
+        frame = frame[x1:x2, y1:y2, 0]
 
         fgmask = fgbg.apply(frame)
         fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, kernel)
@@ -144,12 +137,8 @@ def play(args):
         # frame = cv2.hconcat([frame, fgmask])
         # cv2.imshow('window-name', frame)
 
-        if cv2.waitKey(10) & 0xFF == ord('q'):
-            break
-
     with open(args.json, 'w') as f:
         json.dump(components, f)
     print(f'\nFound {len(components)} events, save to {args.json}')
 
-    cap.release()
     cv2.destroyAllWindows()  # destroy all opened windows
