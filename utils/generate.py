@@ -1,12 +1,16 @@
-import cv2
+import os
 import pickle
-import matplotlib.pyplot as plt
 from collections import deque
+
+import matplotlib.pyplot as plt
+import cv2
+
 from utils import Tirf
 
-
 class SmallVideo:
-    def __init__(self, info, fps, size=32, n_frame=200, buf=40, name='sample'):
+    def __init__(self, info, fps, size=32, n_frame=200,
+                 buf=40, name='sample', dir_='.'):
+        self.dir = dir_
         self.x_start = info['x'] - size//2
         self.y_start = info['y'] - size//2
         self.x_end = self.x_start + size
@@ -33,7 +37,8 @@ class SmallVideo:
         self.title = f"{name}: {self.time:.2f}s {self.coor}"
 
         # TODO open writer when in active list
-        self.video = cv2.VideoWriter(f'{self.name}.avi',
+        self.path = os.path.join(self.dir, self.name)
+        self.video = cv2.VideoWriter(f'{self.path}.avi',
                                      cv2.VideoWriter_fourcc(*'XVID'),
                                      self.fps, self.size)
 
@@ -51,7 +56,7 @@ class SmallVideo:
 
     def terminate(self):
         self.video.release()
-        print(f'Save video {self.name}')
+        print(f'Save video {self.path}.avi')
         return self.title, self.start_frame, self.intensity
 
 
@@ -61,12 +66,12 @@ def save_videos(infos, args):
     # tirf = Tirf(args.video, args.x, args.y) ?
 
     videos = list(sorted([
-        SmallVideo(info, tirf.fps, name=f'{i}')
+        SmallVideo(info, tirf.fps, name=f'{i}', dir_=args.output)
         for i, info in enumerate(infos)
     ], key=lambda obj: obj.start_frame))
 
     for i, vid in enumerate(videos):
-        vid.set_name(i)
+        vid.set_name(str(i))
 
     videos = deque(videos)
 
@@ -95,7 +100,7 @@ def save_videos(infos, args):
     return plots
 
 
-def plot_graph(row, col, plots, i):
+def plot_graph(row, col, plots, i, dir_):
     assert len(plots) <= row*col
     plt.clf()
     fig = plt.figure(figsize=(20, 20))
@@ -108,21 +113,22 @@ def plot_graph(row, col, plots, i):
         print(f'Plot subgraph {name}')
 
     fig.suptitle('Title')
-    plt.savefig(f'{i}.png')
-    print(f'Save {i}.png')
+    path = os.path.join(dir_, f'{i}.png')
+    plt.savefig(path)
+    print(path)
 
 
-def plot_graphs(plots, row=4, col=4):
+def plot_graphs(plots, dir_, row=4, col=4):
     plots = [
         plots[i: i+row*col]
         for i in range(0, len(plots), row*col)
     ]
     for i, data in enumerate(plots):
-        plot_graph(row, col, data, i)
+        plot_graph(row, col, data, i, dir_)
 
 
 def generate(args):
     with open(args.pkl, 'rb') as f:
         infos = pickle.load(f)
     plots = save_videos(infos, args)
-    plot_graphs(plots)
+    plot_graphs(plots, args.output)

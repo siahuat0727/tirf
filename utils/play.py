@@ -127,9 +127,6 @@ def play(args):
         if args.start is not None and frame_i < args.start:
             continue
 
-        if args.fps is not None:
-            time.sleep(1/args.fps)
-
         frame = frame[:, :, 0]
 
         fgmask = fgbg.apply(frame)
@@ -150,7 +147,7 @@ def play(args):
             if curs:  # If prev
                 cur = comps[curs[0]]
                 for cur_i in curs[1:]:
-                    print('\rWarning: one to many')
+                    print(f'\r{frame_i} - Warning: one to many')
                     outlier.add(id(comps))
                     cur |= comps[cur_i]
                 p_comps.append((frame_i, cur))
@@ -178,15 +175,19 @@ def play(args):
 
         if len(cur_connected) != len(
                 list(i for ll in prev_cur for i in ll)):
-            print('\rWarning: many to one')
+            print(f'\r{frame_i} - Warning: many to one')
 
         for i, con in enumerate(comps):
             if i not in cur_connected:
                 prev_comps.append([(frame_i, con)])
 
         # fgmask = np.stack([fgmask for _ in range(3)], axis=2)
-        # frame = cv2.hconcat([frame, fgmask])
-        # cv2.imshow('window-name', frame)
+        if args.show and (args.shows is None or frame_i > args.shows[0]):
+            frame = cv2.hconcat([frame, fgmask])
+            cv2.imshow('window-name', frame)
+            if args.fps is not None:
+                time.sleep(1/args.fps)
+
 
     total_frame = frame_i+1
     if args.reverse:

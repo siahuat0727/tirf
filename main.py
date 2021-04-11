@@ -8,7 +8,7 @@ def parse():
 
     parser.add_argument('--task', type=str,
                         choices=['play', 'gen'])
-    parser.add_argument('--fps', type=int, default=None,
+    parser.add_argument('--fps', type=float, default=None,
                         help='Frames per second')
     parser.add_argument('--start', type=int, default=None,
                         help='In PLAY mode, skip until this frame')
@@ -24,6 +24,9 @@ def parse():
                         help='Pickle file (output for DECT, input for GEN)')
     parser.add_argument('--reverse', action='store_true',
                         help='Whether process the video reversely')
+    parser.add_argument('--show', action='store_true',
+                        help='')
+    parser.add_argument('--shows', type=int, nargs='+',)
 
     args = parser.parse_args()
     assert args.fps is None or args.fps > 0, 'fps must > 0'
