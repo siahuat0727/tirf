@@ -20,8 +20,10 @@ def parse():
                         help='In PLAY mode, the range of x-axis displayed')
     parser.add_argument('--y', type=int, nargs='+',
                         help='In PLAY mode, the range of y-axis displayed')
-    parser.add_argument('--json', type=str, default='info.json',
-                        help='Json file (output for DECT, input for GEN)')
+    parser.add_argument('--pkl', type=str, default='info.pkl',
+                        help='Pickle file (output for DECT, input for GEN)')
+    parser.add_argument('--reverse', action='store_true',
+                        help='Whether process the video reversely')
 
     args = parser.parse_args()
     assert args.fps is None or args.fps > 0, 'fps must > 0'

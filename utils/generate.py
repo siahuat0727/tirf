@@ -1,5 +1,5 @@
 import cv2
-import json
+import pickle
 import matplotlib.pyplot as plt
 from collections import deque
 from utils import Tirf
@@ -58,6 +58,7 @@ class SmallVideo:
 def save_videos(infos, args):
 
     tirf = Tirf(args.video)
+    # tirf = Tirf(args.video, args.x, args.y) ?
 
     videos = list(sorted([
         SmallVideo(info, tirf.fps, name=f'{i}')
@@ -72,7 +73,7 @@ def save_videos(infos, args):
     active = []
     plots = []
 
-    for frame_i, frame in tirf.readall():
+    for frame_i, frame in enumerate(tirf.readall()):
         if not (videos or active):
             break
 
@@ -91,7 +92,6 @@ def save_videos(infos, args):
 
         active = [video for video in active if not video.is_end(frame_i)]
 
-    cap.release()
     return plots
 
 
@@ -122,7 +122,7 @@ def plot_graphs(plots, row=4, col=4):
 
 
 def generate(args):
-    with open(args.json) as f:
-        infos = json.load(f)
+    with open(args.pkl, 'rb') as f:
+        infos = pickle.load(f)
     plots = save_videos(infos, args)
     plot_graphs(plots)

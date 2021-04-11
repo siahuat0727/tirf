@@ -1,8 +1,53 @@
 import cv2
 import numpy as np
-import json
+import pickle
 import time
 from utils import Tirf
+
+
+def comp_reverse(comps, total_frame):
+    def frame_reverse(comp):
+        assert isinstance(comp, dict)
+
+        def do_reverse(k):
+            v = comp[{
+                'frame_start': 'frame_end',
+                'frame_end': 'frame_start',
+            }.get(k, k)]
+            if k == 'regions':
+                assert all(
+                    isinstance(con, tuple) and
+                    len(con) == 2 and
+                    isinstance(con[1], set)
+                    for con in v
+                ), v
+
+                v = [
+                    (total_frame-1-frame_i, comp)
+                    for frame_i, comp in reversed(v)
+                ]
+                do_reverse.regions = True
+            elif k in ('frame_start', 'frame_end', 'frame'):
+                v = total_frame-1-v
+                assert 0 <= v < total_frame
+                do_reverse.frame = True
+            return v
+
+        res = {
+            k: do_reverse(k)
+            for k in comp.keys()
+        }
+        assert do_reverse.frame and do_reverse.regions
+        return res
+
+    return [
+        frame_reverse(comp)
+        for comp in comps
+    ]
+
+
+def comp_sort(comps):
+    return list(sorted(comps, key=lambda d: d['frame_start']))
 
 
 def find_connected_component(graph, frame):
@@ -54,6 +99,7 @@ def process(cons, args):
         'y_max': max(ys),
         'y': sum(ys) // total_point,
         'total_point': total_point,
+        'regions': cons,
     }
     for k in info.keys():
         if k in ('x', 'x_min', 'x_max'):
@@ -70,8 +116,13 @@ def play(args):
     outlier = set()
     fgbg = cv2.bgsegm.createBackgroundSubtractorMOG()
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
-    tirf = Tirf(args.video)
-    for frame_i, frame in tirf.readall():
+    tirf = Tirf(args.video, args.x, args.y)
+
+    frames = tirf.readall()
+    if args.reverse:
+        frames = reversed(list(frames))
+
+    for frame_i, frame in enumerate(frames):
         print(f'\rFrame: {frame_i}, found {len(components)} events', end='')
         if args.start is not None and frame_i < args.start:
             continue
@@ -79,9 +130,7 @@ def play(args):
         if args.fps is not None:
             time.sleep(1/args.fps)
 
-        x1, x2 = args.x
-        y1, y2 = args.y
-        frame = frame[x1:x2, y1:y2, 0]
+        frame = frame[:, :, 0]
 
         fgmask = fgbg.apply(frame)
         fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, kernel)
@@ -108,7 +157,9 @@ def play(args):
             else:
                 assert isinstance(p_comps, list), p_comps
                 assert all(
-                    isinstance(con, tuple) and len(con) == 2
+                    isinstance(con, tuple) and
+                    len(con) == 2 and
+                    isinstance(con[1], set)
                     for con in p_comps
                 ), p_comps
                 components.append(process(p_comps, args))
@@ -137,8 +188,14 @@ def play(args):
         # frame = cv2.hconcat([frame, fgmask])
         # cv2.imshow('window-name', frame)
 
-    with open(args.json, 'w') as f:
-        json.dump(components, f)
-    print(f'\nFound {len(components)} events, save to {args.json}')
+    total_frame = frame_i+1
+    if args.reverse:
+        components = comp_reverse(components, total_frame)
+
+    components = comp_sort(components)
+
+    with open(args.pkl, 'wb') as f:
+        pickle.dump(components, f)
+    print(f'\nFound {len(components)} events, save to {args.pkl}')
 
     cv2.destroyAllWindows()  # destroy all opened windows
