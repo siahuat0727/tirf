@@ -1,0 +1,5 @@
+opencv-python
+opencv-contrib-python
+matplotlib
+nd2reader
+connected-components-3d

@@ -1,20 +1,26 @@
 import os
 import pickle
 from collections import deque
+from pathlib import Path
+from PIL import Image
+import subprocess
+
 
 import matplotlib.pyplot as plt
 import cv2
 
-from utils import Tirf
+from .utils import select_reader
 
 class SmallVideo:
-    def __init__(self, info, fps, size=32, n_frame=200,
+    def __init__(self, info, frame_size, fps, size=32, n_frame=200,
                  buf=40, name='sample', dir_='.'):
         self.dir = dir_
-        self.x_start = info['x'] - size//2
-        self.y_start = info['y'] - size//2
-        self.x_end = self.x_start + size
-        self.y_end = self.y_start + size
+        self.x_start = max(0, info['x'] - size//2)
+        self.y_start = max(0, info['y'] - size//2)
+
+        x_max, y_max = frame_size
+        self.x_end = min(self.x_start + size, x_max)
+        self.y_end = min(self.y_start + size, y_max)
 
         # Extend if the event is longer then n_frame
         self.start_frame = max(
@@ -25,26 +31,41 @@ class SmallVideo:
         self.x_max = info['x_max']
         self.y_min = info['y_min']
         self.y_max = info['y_max']
+        self.n_point = info['total_point']
         self.time = info['frame'] / fps
         self.coor = info['x'], info['y']
         self.fps = fps
-        self.size = (size, size)  # TODO check out of box?
+        self.size = (self.x_end-self.x_start, self.y_end - self.y_start)  # TODO check out of box?
 
         self.intensity = []
+        self.frame_i = 0
 
     def set_name(self, name):
         self.name = name  # TODO: better name
-        self.title = f"{name}: {self.time:.2f}s {self.coor}"
+        self.title = f"{name}: {self.time:.2f}s {self.coor} ({self.n_point} points)"
 
         # TODO open writer when in active list
         self.path = os.path.join(self.dir, self.name)
-        self.video = cv2.VideoWriter(f'{self.path}.avi',
-                                     cv2.VideoWriter_fourcc(*'XVID'),
-                                     self.fps, self.size)
+        self.video = cv2.VideoWriter()
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        # ok = self.video.open(f'{self.path}.mov',
+        #                              # cv2.VideoWriter_fourcc(*'XVID'),
+        #                              # cv2.VideoWriter_fourcc(*'MPEG'),
+        #                              cv2.VideoWriter_fourcc(*'mp4v'),
+        #                              self.fps, self.size, True)
 
     def record(self, frame):
-        self.video.write(
-            frame[self.x_start:self.x_end, self.y_start:self.y_end])
+        def save_image():
+            Path(self.path).mkdir(parents=True, exist_ok=True)
+            img_path = f'{self.path}/{self.frame_i:04d}.png'
+            self.frame_i += 1
+            Image.fromarray(frame[self.x_start:self.x_end, self.y_start:self.y_end]).save(img_path)
+
+        save_image()
+
+        # self.video.write(
+        #     frame[self.x_start:self.x_end, self.y_start:self.y_end])
+
         self.intensity.append(
             frame[self.x_min: self.x_max+1, self.y_min: self.y_max+1].mean())
 
@@ -55,37 +76,49 @@ class SmallVideo:
         return frame_i == self.end_frame
 
     def terminate(self):
-        self.video.release()
-        print(f'Save video {self.path}.avi')
+        # self.video.release()
+        # print(f'Save video {self.path}.avi')
+
+        cmd = f'ffmpeg -r 10 -i {self.path}/%04d.png -vcodec libx264 {self.path}.mp4'
+
+        subprocess.call(cmd, shell=True)
+
         return self.title, self.start_frame, self.intensity
 
 
 def save_videos(infos, args):
 
-    tirf = Tirf(args.video)
-    # tirf = Tirf(args.video, args.x, args.y) ?
+    assert args.fps is not None and args.fps > 0
 
-    videos = list(sorted([
-        SmallVideo(info, tirf.fps, name=f'{i}', dir_=args.output)
-        for i, info in enumerate(infos)
-    ], key=lambda obj: obj.start_frame))
+    def get_videos(frame_size):
+        videos = list(sorted([
+            SmallVideo(info, frame_size, args.fps, name=f'{i}', n_frame=args.n_frame, dir_=args.output)
+            for i, info in enumerate(infos)
+        ], key=lambda obj: obj.start_frame))
 
-    for i, vid in enumerate(videos):
-        vid.set_name(str(i))
+        for i, vid in enumerate(videos):
+            vid.set_name(str(i))
 
-    videos = deque(videos)
+        return videos
 
     active = []
     plots = []
 
-    for frame_i, frame in enumerate(tirf.readall()):
+    reader = select_reader(args.input_type)
+    generator = reader(args.input)
+    videos = None
+
+    for frame_i, frame in enumerate(generator):
+        if videos is None:
+            videos = get_videos(frame.shape)[::-1]
+
         if not (videos or active):
             break
 
-        while videos and videos[0].is_start(frame_i):
-            active.append(videos.popleft())
+        while videos and videos[-1].is_start(frame_i):
+            active.append(videos.pop())
 
-        print(f'\r{frame_i} ', end='')
+        # print(f'\r{frame_i} ', end='')
 
         if not active:
             continue
@@ -114,6 +147,8 @@ def plot_graph(row, col, plots, i, dir_):
 
     fig.suptitle('Title')
     path = os.path.join(dir_, f'{i}.png')
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+
     plt.savefig(path)
     print(path)
 

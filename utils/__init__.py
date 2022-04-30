@@ -1,1 +1,2 @@
-from .utils import Tirf
+from .play import play
+__all__ = ['reader']
