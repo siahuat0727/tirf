@@ -1,7 +1,9 @@
-import cv2
-import numpy as np
 import pickle
 import time
+from collections import Counter
+
+import cv2
+import numpy as np
 import cc3d
 
 from .utils import select_reader
@@ -131,10 +133,19 @@ def filter_prev_comps(prev_comps, frame_comps, frame_i, args):
     return cur_comps, components
 
 
-def process(cons, args):
-    print(cons)
+def process(cons, args, slices=None):
     zs, xs, ys = cons
+
+    def update_xyz_inplace():
+        for pos, slice_ in zip((zs, xs, ys), slices):
+            pos += slice_.start or 0
+
+    if slices is not None:
+        update_xyz_inplace()
+
     total_point = len(zs)
+    n_points = [n for _, n in sorted(Counter(zs).items())]
+
     info = {
         'frame_start': min(zs),
         'frame_end': max(zs),
@@ -145,7 +156,7 @@ def process(cons, args):
         'y_min': min(ys),
         'y_max': max(ys),
         'y': sum(ys) // total_point,
-        'total_point': total_point,
+        'n_points': n_points,
         'regions': cons,
     }
     if args.x is not None:
@@ -159,22 +170,124 @@ def process(cons, args):
     return info
 
 
+def slice2len(slice_):
+    assert slice_.step is None
+    return slice_.stop - (slice_.start or 0)
 
-def extract_comonents(cc, args):
+
+def get_nonzero_ranges(array):
+    """
+    [0, 1, 4, 0, 3, 0] -> [(1, 2), (4, 4)]
+    """
+    lo = None
+    hi = None
+    ranges = []
+    for i, s in enumerate(array):
+        if s:
+            if lo is None:
+                lo = i
+            hi = i
+        elif lo is not None:
+            ranges.append((lo, hi+1))
+            lo = None
+    if lo:
+        ranges.append((lo, hi+1))
+    return ranges
+
+
+def extract_components_faster(cc, args, prev_axis=None):
+    """
+    slices: x y z slices
+    prev_axis: previous split axis (skip this round)
+    """
+
+    ccf = cc.astype(np.float32)
+
+    def maybe_split_slices(slices, prev_axis=None):
+        """
+        Return list of slices
+        """
+
+        def gen_new_split(lo, hi, start, axis):
+            lo += start
+            hi += start
+            return tuple(
+                s if ax != axis else slice(lo, hi)
+                for ax, s in enumerate(slices)
+            )
+
+        len_slices = list(sorted(
+            enumerate(slices),
+            key=lambda pair: slice2len(pair[1]),
+            reverse=True
+        ))
+
+        for axis, slice_ in len_slices:
+            if axis == prev_axis:
+                continue
+            sums = np.sum(ccf[slices], axis=tuple(a for a in range(3) if a != axis))
+            if np.all(sums):
+                continue
+            ranges = get_nonzero_ranges(sums)
+            start = slice_.start or 0
+            assert len(sums) == slice_.stop - start
+            return [
+                slices
+                for lo, hi in ranges
+                for slices in maybe_split_slices(gen_new_split(lo, hi, start, axis), axis)
+            ]
+        return [slices]
+
+    slices = tuple(slice(s) for s in cc.shape)
+    # print(slices)
+    # print()
+    slices_lst = maybe_split_slices(slices)
+    # print('\n'.join(map(str, slices_lst)))
+    print(len(slices_lst))
+
+
+
+    def get_infos(slices):
+        local_cc = cc[slices]
+        return [
+            process(np.array((local_cc==v).nonzero()), args, slices)
+            for v in np.unique(local_cc)
+            if v
+        ]
+        pass
+
+    return [
+        info
+        for slices in slices_lst
+        for info in get_infos(slices)
+    ]
+
+
+
+
+def extract_components(cc, args):
+    # do_extract_comonents(cc, args, [slice(s) for s in cc.shape])
+    extract_components_faster(cc, args)
+    print()
+    print()
     values, counts = np.unique(cc, return_counts=True)
     # sort and Ignore background
     values = list(sorted(values, key=counts.__getitem__, reverse=True))[1:]
+    ccf = cc.astype(np.float32)
     return [
         process(np.array((cc==v).nonzero()), args)
         for v in values
     ]
 
 
+# def extract_components(cc, args, x, y, z):
+
+
 def play(args):
 
     # fgbg = cv2.bgsegm.createBackgroundSubtractorMOG()
     fgbg = cv2.createBackgroundSubtractorMOG2()
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
     reader = select_reader(args.input_type)
     generator = reader(args.input, reverse=args.reverse)
@@ -190,10 +303,13 @@ def play(args):
     if args.reverse:
         cc = cc[::-1]
 
-    components = extract_comonents(cc, args)
-
+    components = extract_components_faster(cc, args)
     components = comp_sort(components)
 
     with open(args.pkl, 'wb') as f:
         pickle.dump(components, f)
+
+    cc = np.logical_not(np.logical_not(cc)).astype(np.uint8) * 255
+    with open(args.cc, 'wb') as f:
+        pickle.dump(cc, f)
     print(f'\nFound {len(components)} events, save to {args.pkl}')

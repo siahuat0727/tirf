@@ -22,7 +22,10 @@ def parse():
     parser.add_argument('--output', type=str, default='results',
                         help='Output results path')
     parser.add_argument('--pkl', type=str, default='info.pkl',
-                        help='Pickle file (output for DECT, input for GEN)')
+                        help='Pickle file (input for GEN)')
+    parser.add_argument('--cc', type=str, default='cc.pkl',
+                        help='Path to save connected components '
+                             'file (input for GEN)')
 
     # PLAY mode setting
     parser.add_argument('--start', type=int, default=None,
