@@ -287,7 +287,7 @@ def play(args):
 
     # fgbg = cv2.bgsegm.createBackgroundSubtractorMOG()
     fgbg = cv2.createBackgroundSubtractorMOG2()
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
 
     reader = select_reader(args.input_type)
     generator = reader(args.input, reverse=args.reverse)

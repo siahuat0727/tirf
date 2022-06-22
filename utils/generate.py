@@ -15,7 +15,7 @@ from .utils import select_reader
 
 class SmallVideo:
     def __init__(self, info, frame_size, fps, size=32, n_frame=200,
-                 buf=40, name='sample', dir_='.'):
+                 name='sample', dir_='.'):
         self.dir = dir_
         self.x_start = max(0, info['x'] - size//2)
         self.y_start = max(0, info['y'] - size//2)
@@ -24,20 +24,19 @@ class SmallVideo:
         self.x_end = min(self.x_start + size, x_max)
         self.y_end = min(self.y_start + size, y_max)
 
-        # Extend if the event is longer then n_frame
-        self.start_frame = max(
-            0, min(info['frame_start'] - buf, info['frame'] - n_frame//2))
-        self.end_frame = max(info['frame_end'] + buf,
-                             info['frame'] + n_frame//2)
+        # Frame slice
+        self.start_frame = max(0, info['frame_end'] - n_frame//2)
+        self.end_frame = info['frame_end'] + n_frame//2
+        self.mid_frame = info['frame_end'] - self.start_frame
+
         self.x_min = info['x_min']
         self.x_max = info['x_max']
         self.y_min = info['y_min']
         self.y_max = info['y_max']
         self.n_points = info['n_points']
         self.time = info['frame'] / fps
-        self.coor = info['x'], info['y']
+        self.coor = info['x'], info['y'], info['frame_end']
         self.fps = fps
-        self.size = (self.x_end-self.x_start, self.y_end - self.y_start)  # TODO check out of box?
 
         self.intensity = []
         self.frame_i = 0
@@ -46,12 +45,19 @@ class SmallVideo:
         self.name = name  # TODO: better name
 
         n_points = ','.join(map(str, self.n_points))
-        self.title = f"{name}: {self.time:.2f}s {self.coor} ({n_points} points)"
+        title = f"{name}: {self.time:.2f}s {self.coor} ({n_points} points)"
+
+        max_len = 35
+        self.title = '\n'.join(
+            title[i:i+max_len]
+            for i in range(0, len(title), max_len)
+        )
+
+        self.path = os.path.join(self.dir, self.name)
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
 
         # TODO open writer when in active list
-        self.path = os.path.join(self.dir, self.name)
-        self.video = cv2.VideoWriter()
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        # self.video = cv2.VideoWriter()
         # ok = self.video.open(f'{self.path}.mov',
         #                              # cv2.VideoWriter_fourcc(*'XVID'),
         #                              # cv2.VideoWriter_fourcc(*'MPEG'),
@@ -101,9 +107,16 @@ class SmallVideo:
 
         cmd = f'ffmpeg -r 10 -i {self.path}/%04d.png -vcodec libx264 {self.path}.mp4'
 
-        subprocess.call(cmd, shell=True)
+        # subprocess.call(cmd, shell=True)
 
-        return self.title, self.start_frame, self.intensity
+        return {
+            'x': self.coor[0],
+            'y': self.coor[1],
+            'z': self.coor[2],
+            'title': self.title,
+            'intensity': self.intensity,
+            'mid': self.mid_frame,
+        }
 
 
 def save_videos(infos, cc, args):
@@ -155,7 +168,12 @@ def save_videos(infos, cc, args):
     return plots
 
 
-def thresholding_algo(y, lag, threshold, influence):
+def thresholding_algo(y, lag, threshold, influence, min_std=0.0, reverse=False):
+    """
+    min_std: Minimum std
+    """
+    if reverse:
+        y = y[::-1]
     signals = np.zeros(len(y))
     filteredY = np.array(y)
     avgFilter = [0]*len(y)
@@ -177,53 +195,169 @@ def thresholding_algo(y, lag, threshold, influence):
             filteredY[i] = y[i]
             avgFilter[i] = np.mean(filteredY[(i-lag):i])
             stdFilter[i] = np.std(filteredY[(i-lag):i])
+        stdFilter[i] = max(min_std, stdFilter[i])
+
+    if reverse:
+        signals = signals[::-1]
+        avgFilter = avgFilter[::-1]
+        stdFilter = stdFilter[::-1]
+
 
     return dict(signals = np.asarray(signals),
                 avgFilter = np.asarray(avgFilter),
                 stdFilter = np.asarray(stdFilter))
 
 
-def plot_graph(row, col, plots, i, dir_):
-    threshold = 5
-    lag = 10
-    assert len(plots) <= row*col
+def ax_plot(ax, x_axis, intensity, intensity_diff, low_bound, high_bound, signal, title, is_candidate, lag=5, **_kwargs):
+    ax.set_ylim(-11, 180)
+    ax.plot(x_axis, intensity)
+    ax.plot(x_axis[:-lag], high_bound[:-lag], color="green", lw=1)
+    ax.plot(x_axis[:-lag], low_bound[:-lag], color="green", lw=1)
+    ax.plot(x_axis[:-1], intensity_diff, color="cyan", lw=1)
+
+    ax.step(x_axis[:-lag], 10*signal[:-lag], color="red", lw=1)
+
+    intensity_diff = (intensity_diff > 8).astype(int)
+    ax.step(x_axis[:-1], 5*intensity_diff + 1, color="black", lw=1)
+
+    ax.plot(x_axis, intensity)
+    if is_candidate:
+        title = f'Good {title}'
+
+    ax.title.set_text(title)
+    print(f'Plot subgraph {title}')
+
+
+def data_to_plot_info(data, threshold, lag, influence):
+    title = data['title']
+    intensity = data['intensity']
+    mid = data['mid']
+
+    result = thresholding_algo(intensity,
+                               lag=lag,
+                               threshold=threshold,
+                               influence=influence,
+                               min_std=1.5,
+                               reverse=True)
+
+    x_axis = list(range(len(intensity)))
+    low_bound = result["avgFilter"] - threshold * result["stdFilter"]
+    high_bound = result["avgFilter"] + threshold * result["stdFilter"]
+    signal = result["signals"]
+
+    is_candidate = np.sum(result["signals"][mid-1:mid+2] == 1) > 0
+
+    intensity_diff = np.asarray(intensity[:-1])  - np.asarray(intensity[1:])
+    is_drastically_drop = np.sum(intensity_diff[mid-2:mid+3] > 8) > 0
+
+    return {
+        'x': data['x'],
+        'y': data['y'],
+        'z': data['z'],
+        'x_axis': x_axis,
+        'intensity': intensity,
+        'intensity_diff': intensity_diff,
+        'low_bound': low_bound,
+        'high_bound': high_bound,
+        'signal': signal,
+        'title': title,
+        'is_candidate': is_candidate,
+        'is_drastically_drop': is_drastically_drop,
+    }
+
+def plot_graph(row, col, infos, lag):
+
+    assert len(infos) <= row*col
     plt.clf()
     fig = plt.figure(figsize=(20, 20))
     gs = fig.add_gridspec(row, col, hspace=0.5, wspace=0)
     axs = gs.subplots(sharey=True)
-    for ax, data in zip(axs.flat, plots):
-        name, start_frame, intensity = data
 
-        result = thresholding_algo(intensity[::-1],
-                                   lag=lag,
-                                   threshold=threshold,
-                                   influence=0.4)
-        x_axis = list(range(start_frame, start_frame+len(intensity)))
-        low_bound = result["avgFilter"] - threshold * result["stdFilter"]
-        high_bound = result["avgFilter"] + threshold * result["stdFilter"]
-
-        ax.plot(x_axis, intensity)
-        ax.plot(x_axis[:-lag], high_bound[lag:][::-1], color="green", lw=1)
-        ax.plot(x_axis[:-lag], low_bound[lag:][::-1], color="green", lw=1)
-        ax.step(x_axis[:-lag], 10*result["signals"][lag:][::-1], color="red", lw=1)
-        ax.title.set_text(name)
-        print(f'Plot subgraph {name}')
+    for ax, info in zip(axs.flat, infos):
+        ax_plot(ax, **info, lag=lag)
 
     fig.suptitle('Title')
-    path = os.path.join(dir_, f'{i}.png')
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    return fig
 
-    plt.savefig(path)
-    print(path)
+def plot_graphs(infos, lag, row=4, col=4, dir_='.'):
+    for i, info_i in enumerate(range(0, len(infos), row*col)):
+        fig = plot_graph(row, col, infos[info_i: info_i+row*col], lag)
+        path = str(dir_ / f'{i}.png')
+        plt.savefig(path)
+        print(path)
 
 
-def plot_graphs(plots, dir_, row=4, col=4):
-    plots = [
-        plots[i: i+row*col]
-        for i in range(0, len(plots), row*col)
+def plot(datas, dir_, row=4, col=4, threshold=5, lag=5, influence=0.9):
+    dir_all = Path(dir_) / 'all'
+    dir_all.mkdir(parents=True, exist_ok=True)
+
+    dir_candidate = Path(dir_) / 'candidate'
+    dir_candidate.mkdir(parents=True, exist_ok=True)
+
+    dir_good_candidate = Path(dir_) / 'good_candidate'
+    dir_good_candidate.mkdir(parents=True, exist_ok=True)
+
+    all_infos = [
+        data_to_plot_info(data, threshold, lag, influence)
+        for data in datas
     ]
-    for i, data in enumerate(plots):
-        plot_graph(row, col, data, i, dir_)
+
+    def remove_top_right(info):
+        return not (info['x'] < 24 and info['y'] > 80)
+
+    def remove_custom(infos, remove):
+        return list(filter(remove_top_right, infos))
+
+    all_infos = remove_custom(all_infos, remove_top_right)
+
+    # plot_graphs(all_infos, lag, dir_=dir_all)
+
+    candidate_infos = [
+        info
+        for info in all_infos
+        if info['is_candidate']
+    ]
+    plot_graphs(candidate_infos, lag, dir_=dir_candidate)
+
+    good_candidate_infos = [
+        info
+        for info in candidate_infos
+        if info['is_drastically_drop']
+    ]
+    plot_graphs(good_candidate_infos, lag, dir_=dir_good_candidate)
+
+    super_candidate_info = remove_many_events_around(good_candidate_infos, all_infos)
+
+    for info in good_candidate_infos:
+        name = info['title'].split(':')[0]
+        path = os.path.join(dir_, name)
+        cmd = f'ffmpeg -r 10 -i {path}/%04d.png -vcodec libx264 {path}.mp4'
+        subprocess.call(cmd, shell=True)
+
+
+def remove_many_events_around(good_infos, all_infos):
+    xs = np.array([info['x'] for info in all_infos])
+    ys = np.array([info['y'] for info in all_infos])
+    zs = np.array([info['z'] for info in all_infos])
+
+    def count_event_around(info):
+        x, y, z = info['x'], info['y'], info['z']
+        z_range = 10
+
+        xy_dis = np.sqrt(((xs - x)**2) + ((ys - y)**2))
+        inside_z = (zs < z+z_range) & (zs > z-z_range)
+        inside_xy = (xy_dis >= 3) & (xy_dis < 20)
+        print(np.sum(inside_z & inside_xy), ' '.join(info['title'].split('\n')))
+        print()
+        return np.sum(inside_z & inside_xy)
+
+    return [
+        info
+        for info in good_infos
+        if count_event_around(info) < 4
+    ]
+
+
 
 
 def generate(args):
@@ -231,5 +365,5 @@ def generate(args):
         infos = pickle.load(f)
     with open(args.cc, 'rb') as f:
         cc = pickle.load(f)
-    plots = save_videos(infos, cc, args)
-    plot_graphs(plots, args.output)
+    datas = save_videos(infos, cc, args)
+    plot(datas, args.output)

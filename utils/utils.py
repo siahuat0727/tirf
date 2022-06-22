@@ -4,29 +4,43 @@ import cv2
 import numpy as np
 from nd2reader import ND2Reader as _ND2Reader
 
+# TODO refactor readers! just simply return a list of images
+
 class VideoReader:
-    def __init__(self, path, x=None, y=None):
+    def __init__(self, path, reverse=False, x=None, y=None):
         self.path = path
         self.cap = None
+        self.reverse = reverse
 
     @property
     def fps(self):
         return self.cap.get(5)
 
     def __next__(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            self.cap.release()
+        if self.image_i == len(self.images):
             raise StopIteration()
-        # if cv2.waitKey(10) & 0xFF == ord('q'):
-        #     break
-        return frame
+        res = self.images[self.image_i]
+        self.image_i += 1
+        return res
 
     def __iter__(self):
-        print('Playing video... (press \'q\' to exit)')
-        self.cap = cv2.VideoCapture(path)
-        assert self.cap.isOpened(), \
+        cap = cv2.VideoCapture(self.path)
+        assert cap.isOpened(), \
             f'Check if the video path is correct: {path}'
+        self.images = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                cap.release()
+                break
+            if len(frame.shape) == 3:
+                assert frame.shape[2] == 3, frame.shape
+                frame = frame[:, :, 0]
+            self.images.append(frame)
+        if self.reverse:
+            self.images = self.images[::-1]
+        self.image_i = 0
+        return self
 
 
 class ND2Reader:
