@@ -287,7 +287,7 @@ def plot_graphs(infos, lag, row=4, col=4, dir_='.'):
         print(path)
 
 
-def plot(datas, dir_, row=4, col=4, threshold=5, lag=5, influence=0.9):
+def plot(args, datas, dir_, row=4, col=4, threshold=5, lag=5, influence=0.9):
     dir_all = Path(dir_) / 'all'
     dir_all.mkdir(parents=True, exist_ok=True)
 
@@ -303,12 +303,22 @@ def plot(datas, dir_, row=4, col=4, threshold=5, lag=5, influence=0.9):
     ]
 
     def remove_top_right(info):
-        return not (info['x'] < 24 and info['y'] > 80)
+        return not (info['x'] < args.rm_x and info['y'] > args.rm_y)
+
+    def remove_top_left(info):
+        return not (info['x'] < args.rm_x and info['y'] < args.rm_y)
 
     def remove_custom(infos, remove):
         return list(filter(remove_top_right, infos))
 
-    all_infos = remove_custom(all_infos, remove_top_right)
+    if args.remove is not None:
+        assert args.rm_x is not None
+        assert args.rm_y is not None
+        remove_func = {
+            'top_left': remove_top_left,
+            'top_right': remove_top_right,
+        }.get(args.remove)
+        all_infos = remove_custom(all_infos, remove_func)
 
     # plot_graphs(all_infos, lag, dir_=dir_all)
 
@@ -366,4 +376,4 @@ def generate(args):
     with open(args.cc, 'rb') as f:
         cc = pickle.load(f)
     datas = save_videos(infos, cc, args)
-    plot(datas, args.output)
+    plot(args, datas, args.output)

@@ -43,6 +43,9 @@ def parse():
 
     # GEN mode setting
     parser.add_argument('--n_frame', type=int, default=60)
+    parser.add_argument('--remove', choices=['top_right', 'top_left'])
+    parser.add_argument('--rm_x', type=int, help='remove x threshold')
+    parser.add_argument('--rm_y', type=int, help='remove y threshold')
 
 
     args = parser.parse_args()

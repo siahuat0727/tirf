@@ -26,7 +26,7 @@ class VideoReader:
     def __iter__(self):
         cap = cv2.VideoCapture(self.path)
         assert cap.isOpened(), \
-            f'Check if the video path is correct: {path}'
+            f'Check if the video path is correct: {self.path}'
         self.images = []
         while True:
             ret, frame = cap.read()
