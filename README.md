@@ -22,11 +22,11 @@ $ python3 -m pip install -r requirements.txt
 ### Play
 
 ```
-$ python3 main.py --task play --x 50 150 --y 50 200 --video xx.avi
+$ python3 main.py --task play --input path/to/input --input_type video --show --fps 10 --reverse
 ```
 
 ### Generate data
 
 ```
-$ python3 main.py --task gen --video xx.avi
+$ python3 main.py --task gen --input path/to/input --input_type video --fps 10 --pkl info.pkl
 ```
