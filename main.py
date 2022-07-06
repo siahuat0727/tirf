@@ -17,6 +17,7 @@ def parse():
                         help='input path')
     parser.add_argument('--input_type', type=str,
                         choices=['video', 'nd2', 'images'],
+                        default='video',
                         help='images: image directory with only images '
                              '(can be directly sorted)')
     parser.add_argument('--output', type=str, default='results',
