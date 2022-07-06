@@ -116,7 +116,6 @@ def filter_prev_comps(prev_comps, frame_comps, frame_i, args):
             ), p_comps
             components.append(process(p_comps, args))
 
-
     cur_connected = set(
         i
         for ll in prev_cur
@@ -225,7 +224,8 @@ def extract_components_faster(cc, args, prev_axis=None):
         for axis, slice_ in len_slices:
             if axis == prev_axis:
                 continue
-            sums = np.sum(ccf[slices], axis=tuple(a for a in range(3) if a != axis))
+            sums = np.sum(ccf[slices], axis=tuple(
+                a for a in range(3) if a != axis))
             if np.all(sums):
                 continue
             ranges = get_nonzero_ranges(sums)
@@ -245,12 +245,10 @@ def extract_components_faster(cc, args, prev_axis=None):
     # print('\n'.join(map(str, slices_lst)))
     print(len(slices_lst))
 
-
-
     def get_infos(slices):
         local_cc = cc[slices]
         return [
-            process(np.array((local_cc==v).nonzero()), args, slices)
+            process(np.array((local_cc == v).nonzero()), args, slices)
             for v in np.unique(local_cc)
             if v
         ]
@@ -263,8 +261,6 @@ def extract_components_faster(cc, args, prev_axis=None):
     ]
 
 
-
-
 def extract_components(cc, args):
     # do_extract_comonents(cc, args, [slice(s) for s in cc.shape])
     extract_components_faster(cc, args)
@@ -275,7 +271,7 @@ def extract_components(cc, args):
     values = list(sorted(values, key=counts.__getitem__, reverse=True))[1:]
     ccf = cc.astype(np.float32)
     return [
-        process(np.array((cc==v).nonzero()), args)
+        process(np.array((cc == v).nonzero()), args)
         for v in values
     ]
 
@@ -291,7 +287,6 @@ def play(args):
 
     reader = select_reader(args.input_type)
     generator = reader(args.input, reverse=args.reverse)
-
 
     detect_imgs = np.array([
         cv2.morphologyEx(fgbg.apply(frame), cv2.MORPH_OPEN, kernel)

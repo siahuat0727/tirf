@@ -13,6 +13,7 @@ import cv2
 
 from .utils import select_reader
 
+
 class SmallVideo:
     def __init__(self, info, frame_size, fps, size=32, n_frame=200,
                  name='sample', dir_='.'):
@@ -79,11 +80,14 @@ class SmallVideo:
             Path(self.path).mkdir(parents=True, exist_ok=True)
             img_path = f'{self.path}/{self.frame_i:04d}.png'
             self.frame_i += 1
-            image = draw_rect(frame, self.x_min, self.x_max, self.y_min, self.y_max)
-            image_cc = draw_rect(cc_frame, self.x_min, self.x_max, self.y_min, self.y_max)
+            image = draw_rect(frame, self.x_min, self.x_max,
+                              self.y_min, self.y_max)
+            image_cc = draw_rect(cc_frame, self.x_min,
+                                 self.x_max, self.y_min, self.y_max)
 
             image = image[self.x_start:self.x_end, self.y_start:self.y_end]
-            image_cc = image_cc[self.x_start:self.x_end, self.y_start:self.y_end]
+            image_cc = image_cc[self.x_start:self.x_end,
+                                self.y_start:self.y_end]
             image = np.concatenate((image, image_cc), axis=1)
             Image.fromarray(image).save(img_path)
 
@@ -125,7 +129,8 @@ def save_videos(infos, cc, args):
 
     def get_videos(frame_size):
         videos = list(sorted([
-            SmallVideo(info, frame_size, args.fps, name=f'{i}', n_frame=args.n_frame, dir_=args.output)
+            SmallVideo(info, frame_size, args.fps,
+                       name=f'{i}', n_frame=args.n_frame, dir_=args.output)
             for i, info in enumerate(infos)
         ], key=lambda obj: obj.start_frame))
 
@@ -181,7 +186,7 @@ def thresholding_algo(y, lag, threshold, influence, min_std=0.0, reverse=False):
     avgFilter[lag - 1] = np.mean(y[0:lag])
     stdFilter[lag - 1] = np.std(y[0:lag])
     for i in range(lag, len(y)):
-        if abs(y[i] - avgFilter[i-1]) > threshold * stdFilter [i-1]:
+        if abs(y[i] - avgFilter[i-1]) > threshold * stdFilter[i-1]:
             if y[i] > avgFilter[i-1]:
                 signals[i] = 1
             else:
@@ -202,10 +207,9 @@ def thresholding_algo(y, lag, threshold, influence, min_std=0.0, reverse=False):
         avgFilter = avgFilter[::-1]
         stdFilter = stdFilter[::-1]
 
-
-    return dict(signals = np.asarray(signals),
-                avgFilter = np.asarray(avgFilter),
-                stdFilter = np.asarray(stdFilter))
+    return dict(signals=np.asarray(signals),
+                avgFilter=np.asarray(avgFilter),
+                stdFilter=np.asarray(stdFilter))
 
 
 def ax_plot(ax, x_axis, intensity, intensity_diff, low_bound, high_bound, signal, title, is_candidate, lag=5, **_kwargs):
@@ -247,7 +251,7 @@ def data_to_plot_info(data, threshold, lag, influence):
 
     is_candidate = np.sum(result["signals"][mid-1:mid+2] == 1) > 0
 
-    intensity_diff = np.asarray(intensity[:-1])  - np.asarray(intensity[1:])
+    intensity_diff = np.asarray(intensity[:-1]) - np.asarray(intensity[1:])
     is_drastically_drop = np.sum(intensity_diff[mid-2:mid+3] > 8) > 0
 
     return {
@@ -265,6 +269,7 @@ def data_to_plot_info(data, threshold, lag, influence):
         'is_drastically_drop': is_drastically_drop,
     }
 
+
 def plot_graph(row, col, infos, lag):
 
     assert len(infos) <= row*col
@@ -278,6 +283,7 @@ def plot_graph(row, col, infos, lag):
 
     fig.suptitle('Title')
     return fig
+
 
 def plot_graphs(infos, lag, row=4, col=4, dir_='.'):
     for i, info_i in enumerate(range(0, len(infos), row*col)):
@@ -336,7 +342,8 @@ def plot(args, datas, dir_, row=4, col=4, threshold=5, lag=5, influence=0.9):
     ]
     plot_graphs(good_candidate_infos, lag, dir_=dir_good_candidate)
 
-    super_candidate_info = remove_many_events_around(good_candidate_infos, all_infos)
+    super_candidate_info = remove_many_events_around(
+        good_candidate_infos, all_infos)
 
     for info in good_candidate_infos:
         name = info['title'].split(':')[0]
@@ -357,7 +364,8 @@ def remove_many_events_around(good_infos, all_infos):
         xy_dis = np.sqrt(((xs - x)**2) + ((ys - y)**2))
         inside_z = (zs < z+z_range) & (zs > z-z_range)
         inside_xy = (xy_dis >= 3) & (xy_dis < 20)
-        print(np.sum(inside_z & inside_xy), ' '.join(info['title'].split('\n')))
+        print(np.sum(inside_z & inside_xy),
+              ' '.join(info['title'].split('\n')))
         print()
         return np.sum(inside_z & inside_xy)
 
@@ -366,8 +374,6 @@ def remove_many_events_around(good_infos, all_infos):
         for info in good_infos
         if count_event_around(info) < 4
     ]
-
-
 
 
 def generate(args):

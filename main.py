@@ -1,6 +1,5 @@
 from argparse import ArgumentParser
-from utils import play
-from utils.generate import generate
+from utils import play, generate
 
 
 def parse():
@@ -47,7 +46,6 @@ def parse():
     parser.add_argument('--remove', choices=['top_right', 'top_left'])
     parser.add_argument('--rm_x', type=int, help='remove x threshold')
     parser.add_argument('--rm_y', type=int, help='remove y threshold')
-
 
     args = parser.parse_args()
     assert args.fps is None or args.fps > 0, 'fps must > 0'

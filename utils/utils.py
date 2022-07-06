@@ -6,6 +6,7 @@ from nd2reader import ND2Reader as _ND2Reader
 
 # TODO refactor readers! just simply return a list of images
 
+
 class VideoReader:
     def __init__(self, path, reverse=False, x=None, y=None):
         self.path = path
@@ -66,7 +67,6 @@ class ND2Reader:
         self.images = ((images / np.max(images)) * 255).astype(np.uint8)
         self.image_i = 0
         return self
-
 
 
 def select_reader(in_type):

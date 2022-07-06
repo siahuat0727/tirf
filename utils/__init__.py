@@ -1,2 +1,2 @@
 from .play import play
-__all__ = ['reader']
+from .generate import generate
