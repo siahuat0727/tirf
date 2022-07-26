@@ -1,12 +1,15 @@
 import pickle
 import time
 from collections import Counter
+from pathlib import Path
+import shutil
 
 import cv2
 import numpy as np
 import cc3d
 
-from .utils import select_reader
+from .readers import select_reader
+from .utils import crop
 
 
 def comp_reverse(comps, total_frame):
@@ -158,14 +161,6 @@ def process(cons, args, slices=None):
         'n_points': n_points,
         'regions': cons,
     }
-    if args.x is not None:
-        for k in info.keys():
-            if k in ('x', 'x_min', 'x_max'):
-                info[k] += args.x[0]
-    if args.y is not None:
-        for k in info.keys():
-            if k in ('y', 'y_min', 'y_max'):
-                info[k] += args.y[0]
     return info
 
 
@@ -239,11 +234,7 @@ def extract_components_faster(cc, args, prev_axis=None):
         return [slices]
 
     slices = tuple(slice(s) for s in cc.shape)
-    # print(slices)
-    # print()
     slices_lst = maybe_split_slices(slices)
-    # print('\n'.join(map(str, slices_lst)))
-    print(len(slices_lst))
 
     def get_infos(slices):
         local_cc = cc[slices]
@@ -265,7 +256,6 @@ def extract_components(cc, args):
     # do_extract_comonents(cc, args, [slice(s) for s in cc.shape])
     extract_components_faster(cc, args)
     print()
-    print()
     values, counts = np.unique(cc, return_counts=True)
     # sort and Ignore background
     values = list(sorted(values, key=counts.__getitem__, reverse=True))[1:]
@@ -279,14 +269,24 @@ def extract_components(cc, args):
 # def extract_components(cc, args, x, y, z):
 
 
-def play(args):
-
-    # fgbg = cv2.bgsegm.createBackgroundSubtractorMOG()
-    fgbg = cv2.createBackgroundSubtractorMOG2()
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
+def play(args, out_dir):
 
     reader = select_reader(args.input_type)
     generator = reader(args.input, reverse=args.reverse)
+
+    if args.show:
+        print('Showing...')
+        for i, frame in enumerate(generator):
+            print(f'\r{i} {frame.shape}', end='')
+            if args.x is not None and args.y is not None:
+                frame = crop(frame, *args.x, *args.y)
+            cv2.imshow('frame', frame)
+            cv2.waitKey(1)
+        print()
+        return
+
+    fgbg = cv2.createBackgroundSubtractorMOG2()
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
 
     detect_imgs = np.array([
         cv2.morphologyEx(fgbg.apply(frame), cv2.MORPH_OPEN, kernel)
@@ -299,12 +299,40 @@ def play(args):
         cc = cc[::-1]
 
     components = extract_components_faster(cc, args)
-    components = comp_sort(components)
+    components = nms(components, args.nms)
 
-    with open(args.pkl, 'wb') as f:
+    # If directory exists, ask user to enter y or n. If y, delete it.
+    if out_dir.exists() and input('Directory exists. Delete it? [y/n] ') == 'y':
+        shutil.rmtree(out_dir)
+    out_dir = out_dir / 'infos'
+    out_dir.mkdir(exist_ok=True, parents=True)
+
+    with open(out_dir / args.pkl, 'wb') as f:
         pickle.dump(components, f)
 
     cc = np.logical_not(np.logical_not(cc)).astype(np.uint8) * 255
-    with open(args.cc, 'wb') as f:
+    with open(out_dir / args.cc, 'wb') as f:
         pickle.dump(cc, f)
     print(f'\nFound {len(components)} events, save to {args.pkl}')
+
+
+def nms(components, threshold):
+    """Non-Maximum Suppression. Remove component if distance is closer than threshold"""
+
+    def get_distance(c1, c2):
+        return np.sqrt(
+            (c1['x'] - c2['x']) ** 2 +
+            (c1['y'] - c2['y']) ** 2 +
+            (c1['frame_end'] - c2['frame_end']) ** 2
+        )
+
+    components = list(sorted(components, key=lambda c: c['frame_end'], reverse=True))
+    res = []
+    for c in components:
+        if any(
+            get_distance(c, c2) < threshold
+            for c2 in res
+        ):
+            continue
+        res.append(c)
+    return res[::-1]

@@ -1,4 +1,5 @@
 import os
+import csv
 import pickle
 from copy import deepcopy
 from collections import deque
@@ -7,28 +8,28 @@ from PIL import Image
 import subprocess
 import numpy as np
 
-
 import matplotlib.pyplot as plt
 import cv2
 
-from .utils import select_reader
+from .readers import select_reader
 
 
 class SmallVideo:
-    def __init__(self, info, frame_size, fps, size=32, n_frame=200,
-                 name='sample', dir_='.'):
+    # TODO rename size to width
+    def __init__(self, info, frame_size, fps, size=32, n_frame_before=50,
+                 n_frame_after=10, name='sample', dir_='.', for_anotation=False):
         self.dir = dir_
-        self.x_start = max(0, info['x'] - size//2)
-        self.y_start = max(0, info['y'] - size//2)
-
-        x_max, y_max = frame_size
-        self.x_end = min(self.x_start + size, x_max)
-        self.y_end = min(self.y_start + size, y_max)
+        self.center = info['x'], info['y']
+        self.size = size
+        self.for_anotation = for_anotation
 
         # Frame slice
-        self.start_frame = max(0, info['frame_end'] - n_frame//2)
-        self.end_frame = info['frame_end'] + n_frame//2
-        self.mid_frame = info['frame_end'] - self.start_frame
+        self.n_frame_after = n_frame_after
+        # self.start_frame = max(0, info['frame_end'] - n_frame_before)
+        self.start_frame = info['frame_end'] - n_frame_before
+        self.end_frame = info['frame_end'] + n_frame_after
+        self.total_frame = n_frame_before + n_frame_after + 1
+
 
         self.x_min = info['x_min']
         self.x_max = info['x_max']
@@ -40,7 +41,7 @@ class SmallVideo:
         self.fps = fps
 
         self.intensity = []
-        self.frame_i = 0
+        self.image_count = 0
 
     def set_name(self, name):
         self.name = name  # TODO: better name
@@ -55,7 +56,11 @@ class SmallVideo:
         )
 
         self.path = os.path.join(self.dir, self.name)
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.path).mkdir(parents=True, exist_ok=True)
+
+        if self.start_frame < 0:
+            self.add_padding_image(-self.start_frame)
+            self.start_frame = 0
 
         # TODO open writer when in active list
         # self.video = cv2.VideoWriter()
@@ -76,28 +81,54 @@ class SmallVideo:
             image[x_hi, y_hi] = 255
             return image
 
-        def save_image():
-            Path(self.path).mkdir(parents=True, exist_ok=True)
-            img_path = f'{self.path}/{self.frame_i:04d}.png'
-            self.frame_i += 1
+        def get_two_ends(center, size):
+            return center - size//2, center + size//2
+
+        def crop_image(image, center, size: int):
+            """
+            Generate a croped numpy image centered on the center with size.
+            If the size is out of bound, add zero padding to ensure center is
+            in the image center.
+            """
+            x_lo, x_hi = get_two_ends(center[0], size)
+            y_lo, y_hi = get_two_ends(center[1], size)
+            x_lo_pad = max(0, x_lo) - x_lo
+            x_hi_pad = x_hi - min(image.shape[0]-1, x_hi)
+            y_lo_pad = max(0, y_lo) - y_lo
+            y_hi_pad = y_hi - min(image.shape[1]-1, y_hi)
+            image = image[max(0, x_lo):min(image.shape[0]-1, x_hi), max(0, y_lo):min(image.shape[1]-1, y_hi)]
+            image = np.pad(image, ((x_lo_pad, x_hi_pad), (y_lo_pad, y_hi_pad)), 'constant')
+            assert image.shape == (size, size), f'{image.shape} != {size, size}'
+            return image
+
+
+        def get_concatenated_image(frame, cc_frame):
             image = draw_rect(frame, self.x_min, self.x_max,
                               self.y_min, self.y_max)
             image_cc = draw_rect(cc_frame, self.x_min,
                                  self.x_max, self.y_min, self.y_max)
+            image = crop_image(image, self.center, self.size)
+            image_cc = crop_image(image_cc, self.center, self.size)
+            return np.concatenate((image, image_cc), axis=1)
 
-            image = image[self.x_start:self.x_end, self.y_start:self.y_end]
-            image_cc = image_cc[self.x_start:self.x_end,
-                                self.y_start:self.y_end]
-            image = np.concatenate((image, image_cc), axis=1)
-            Image.fromarray(image).save(img_path)
+        if self.for_anotation:
+            image = get_concatenated_image(frame, cc_frame)
+        else:
+            image = crop_image(frame, self.center, self.size)
 
-        save_image()
-
-        # self.video.write(
-        #     frame[self.x_start:self.x_end, self.y_start:self.y_end])
+        self.save_image(image)
 
         self.intensity.append(
             frame[self.x_min: self.x_max+1, self.y_min: self.y_max+1].mean())
+
+    def add_padding_image(self, n_padding_frame):
+        """ Add n_padding_frame of zero padding image to the video. """
+        for _ in range(n_padding_frame):
+            self.save_image(np.zeros((self.size, self.size), dtype=np.uint8))
+
+    def save_image(self, image):
+        save_image(f'{self.path}/{self.image_count:04d}.png', image)
+        self.image_count += 1
 
     def is_start(self, frame_i):
         return frame_i == self.start_frame
@@ -109,6 +140,8 @@ class SmallVideo:
         # self.video.release()
         # print(f'Save video {self.path}.avi')
 
+        self.add_padding_image(self.total_frame - self.image_count)
+
         cmd = f'ffmpeg -r 10 -i {self.path}/%04d.png -vcodec libx264 {self.path}.mp4'
 
         # subprocess.call(cmd, shell=True)
@@ -119,18 +152,24 @@ class SmallVideo:
             'z': self.coor[2],
             'title': self.title,
             'intensity': self.intensity,
-            'mid': self.mid_frame,
+            'n_frame_after': self.n_frame_after,
+            'n_points': self.n_points,
         }
 
 
-def save_videos(infos, cc, args):
+def save_image(img_path, image):
+    Image.fromarray(image).save(img_path)
 
-    assert args.fps is not None and args.fps > 0
+def save_videos(infos, cc, args, out_dir):
 
     def get_videos(frame_size):
         videos = list(sorted([
-            SmallVideo(info, frame_size, args.fps,
-                       name=f'{i}', n_frame=args.n_frame, dir_=args.output)
+            SmallVideo(info, frame_size, args.fps, size=args.crop_size,
+                       name=str(i),
+                       n_frame_before=args.n_frame_before,
+                       n_frame_after=args.n_frame_after,
+                       dir_=out_dir / 'frames',
+                       for_anotation=args.for_anotation)
             for i, info in enumerate(infos)
         ], key=lambda obj: obj.start_frame))
 
@@ -235,7 +274,7 @@ def ax_plot(ax, x_axis, intensity, intensity_diff, low_bound, high_bound, signal
 def data_to_plot_info(data, threshold, lag, influence):
     title = data['title']
     intensity = data['intensity']
-    mid = data['mid']
+    n_frame_after = data['n_frame_after']
 
     result = thresholding_algo(intensity,
                                lag=lag,
@@ -249,10 +288,11 @@ def data_to_plot_info(data, threshold, lag, influence):
     high_bound = result["avgFilter"] + threshold * result["stdFilter"]
     signal = result["signals"]
 
-    is_candidate = np.sum(result["signals"][mid-1:mid+2] == 1) > 0
+    # TODO check off-by-one
+    is_candidate = np.sum(result["signals"][-n_frame_after-3:-n_frame_after+3] == 1) > 0
 
     intensity_diff = np.asarray(intensity[:-1]) - np.asarray(intensity[1:])
-    is_drastically_drop = np.sum(intensity_diff[mid-2:mid+3] > 8) > 0
+    is_drastically_drop = np.sum(intensity_diff[-n_frame_after-2:-n_frame_after+3] > 8) > 0
 
     return {
         'x': data['x'],
@@ -261,12 +301,14 @@ def data_to_plot_info(data, threshold, lag, influence):
         'x_axis': x_axis,
         'intensity': intensity,
         'intensity_diff': intensity_diff,
+        'event_intensity_diff': intensity_diff[-n_frame_after-2:-n_frame_after+3],
         'low_bound': low_bound,
         'high_bound': high_bound,
         'signal': signal,
         'title': title,
         'is_candidate': is_candidate,
         'is_drastically_drop': is_drastically_drop,
+        'n_points': data['n_points'],
     }
 
 
@@ -294,13 +336,14 @@ def plot_graphs(infos, lag, row=4, col=4, dir_='.'):
 
 
 def plot(args, datas, dir_, row=4, col=4, threshold=5, lag=5, influence=0.9):
-    dir_all = Path(dir_) / 'all'
+    info_dir = dir_ / 'infos'
+    dir_all = info_dir / 'all'
     dir_all.mkdir(parents=True, exist_ok=True)
 
-    dir_candidate = Path(dir_) / 'candidate'
+    dir_candidate = info_dir / 'candidate'
     dir_candidate.mkdir(parents=True, exist_ok=True)
 
-    dir_good_candidate = Path(dir_) / 'good_candidate'
+    dir_good_candidate = info_dir / 'good_candidate'
     dir_good_candidate.mkdir(parents=True, exist_ok=True)
 
     all_infos = [
@@ -326,7 +369,7 @@ def plot(args, datas, dir_, row=4, col=4, threshold=5, lag=5, influence=0.9):
         }.get(args.remove)
         all_infos = remove_custom(all_infos, remove_func)
 
-    # plot_graphs(all_infos, lag, dir_=dir_all)
+    plot_graphs(all_infos, lag, dir_=dir_all)
 
     candidate_infos = [
         info
@@ -335,24 +378,47 @@ def plot(args, datas, dir_, row=4, col=4, threshold=5, lag=5, influence=0.9):
     ]
     plot_graphs(candidate_infos, lag, dir_=dir_candidate)
 
-    good_candidate_infos = [
+    drastic_drop_candidate_infos = [
         info
         for info in candidate_infos
         if info['is_drastically_drop']
     ]
-    plot_graphs(good_candidate_infos, lag, dir_=dir_good_candidate)
+    plot_graphs(drastic_drop_candidate_infos, lag, dir_=dir_good_candidate)
 
-    super_candidate_info = remove_many_events_around(
-        good_candidate_infos, all_infos)
+    candidate_infos = enrich_neighbor_info(candidate_infos, all_infos)
+    generate_dataset(candidate_infos, dir_=dir_)
 
-    for info in good_candidate_infos:
-        name = info['title'].split(':')[0]
-        path = os.path.join(dir_, name)
-        cmd = f'ffmpeg -r 10 -i {path}/%04d.png -vcodec libx264 {path}.mp4'
+    print(f'Number of all candidates: {len(all_infos)}')
+    print(f'Number of good candidates: {len(candidate_infos)}')
+    print(f'Number of good candidate with drastically drop: {len(drastic_drop_candidate_infos)}')
+    # print(f'Number of super candidates: {len(super_candidate_info)}')
+
+
+def generate_dataset(candidate_infos, dir_):
+
+    def generate_video(info, name):
+        frame_dir = dir_ / 'frames' / name
+        cmd = f'ffmpeg -r 10 -i "{frame_dir}/%04d.png" -vcodec libx264 "{dir_ / name}.mp4"'
         subprocess.call(cmd, shell=True)
 
+    # CSV writer
+    with open(dir_ / 'label.csv', 'w') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['name', 'label', 'intensity_diff', 'n_neighbor', 'x,y,z', 'n_points'])
+        for info in candidate_infos:
+            name = info['title'].split(':')[0]
+            generate_video(info, name)
+            writer.writerow([
+                name,
+                '',
+                ', '.join(f'{v:.2f}' for v in info['event_intensity_diff']),
+                info['n_neighbor'],
+                ','.join([str(info['x']), str(info['y']), str(info['z'])]),
+                sum(info['n_points']),
+            ])
 
-def remove_many_events_around(good_infos, all_infos):
+
+def enrich_neighbor_info(good_infos, all_infos):
     xs = np.array([info['x'] for info in all_infos])
     ys = np.array([info['y'] for info in all_infos])
     zs = np.array([info['z'] for info in all_infos])
@@ -369,17 +435,18 @@ def remove_many_events_around(good_infos, all_infos):
         print()
         return np.sum(inside_z & inside_xy)
 
-    return [
-        info
-        for info in good_infos
-        if count_event_around(info) < 4
-    ]
+    for info in good_infos:
+        info['n_neighbor'] = count_event_around(info)
+    return good_infos
 
 
-def generate(args):
-    with open(args.pkl, 'rb') as f:
+def generate(args, out_dir):
+    assert args.fps is not None and args.fps > 0
+
+    info_dir = out_dir / 'infos'
+    with open(info_dir / args.pkl, 'rb') as f:
         infos = pickle.load(f)
-    with open(args.cc, 'rb') as f:
+    with open(info_dir / args.cc, 'rb') as f:
         cc = pickle.load(f)
-    datas = save_videos(infos, cc, args)
-    plot(args, datas, args.output)
+    datas = save_videos(infos, cc, args, out_dir)
+    plot(args, datas, out_dir)
